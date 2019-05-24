@@ -1,0 +1,53 @@
+#!/bin/bash
+set -eu
+
+SHIELD_ETC="${SHIELD_ETC:-/etc/shield}"
+SHIELD_DATA="${SHIELD_DATA:-/var/shield}"
+PORT="${PORT:-80}"
+VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
+
+if [[ ! -d "${SHIELD_ETC}" ]]; then
+  echo >&2 "${SHIELD_ETC}/ directory not found."
+  echo >&2
+  echo >&2 "Perhaps you forgot to set a custom SHIELD_ETC"
+  echo >&2 "environment variable..."
+  exit 1
+fi
+
+if [[ ! -f "${SHIELD_ETC}/ssh.key" ]]; then
+  rm -f "${SHIELD_ETC}/ssh.key.pub"
+  ssh-keygen -m PEM -t rsa -f "${SHIELD_ETC}/ssh.key" -N ''
+  rm -f "${SHIELD_ETC}/ssh.key.pub"
+fi
+
+if [[ ! -f "${SHIELD_ETC}/shieldd.conf" ]]; then
+  legacy_ssh_key=$(cat ${SHIELD_ETC}/ssh.key | sed -e 's/^/      /')
+
+  cat > "${SHIELD_ETC}/shieldd.conf" <<EOF
+---
+listen_addr:     "0.0.0.0:${PORT}"
+private_key:     ${SHIELD_ETC}/ssh.key
+web_root:        /shield/ui
+workers:         ${SHIELD_WORKERS:-5}
+max_timeout:     ${SHIELD_MAX_TIMEOUT:-43200}
+session_timeout: ${SHIELD_SESSION_TIMEOUT:-28800}
+
+data_directory: ${SHIELD_DATA}
+vault_address:  ${VAULT_ADDR}
+log_level:      ${SHIELD_LOG_LEVEL:-info}
+
+fast_loop: ${SHIELD_FAST_LOOP:-5}
+slow_loop: ${SHIELD_SLOW_LOOP:-3600}
+
+env:   "${SHIELD_ENV_NAME:-DOCKER}"
+color: "${SHIELD_COLOR:-yellow}"
+
+failsafe:
+  username: ${SHIELD_FAILSAFE_USERNAME:-admin}
+  password: ${SHIELD_FAILSAFE_PASSWORD:-password}
+EOF
+fi
+
+/shield/bin/shield-schema --database "${SHIELD_DATA}/shield.db"
+exec /shield/bin/shieldd --config "${SHIELD_ETC}/shieldd.conf" "$@"
+exit 1
